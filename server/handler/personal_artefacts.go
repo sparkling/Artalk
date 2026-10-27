@@ -16,6 +16,7 @@ import (
 
 // Serialize explicit vote transitions, including counts, in this single native owner.
 var personalVoteMu sync.Mutex
+var personalStarMu sync.Mutex
 
 func personalPath(value string) bool {
 	u, err := url.Parse(value)
@@ -45,6 +46,8 @@ func PersonalArtefacts(app *core.App, router fiber.Router) {
 		if site == "" || len(site) > 128 || app.Dao().FindSite(site).IsEmpty() {
 			return common.RespError(c, 400, "Invalid site")
 		}
+		personalStarMu.Lock()
+		defer personalStarMu.Unlock()
 		db := app.Dao().DB()
 		scope := func() *gorm.DB { return db.Model(&entity.Star{}).Where("user_id = ? AND site_name = ?", user.ID, site) }
 		if c.Method() == "GET" {

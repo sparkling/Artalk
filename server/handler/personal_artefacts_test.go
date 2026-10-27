@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/artalkjs/artalk/v2/internal/entity"
@@ -90,4 +91,31 @@ func TestPersonalArtefactsPersistAndIsolateUsers(t *testing.T) {
 	require.Equal(t, 200, code)
 	require.Equal(t, "", data["choice"])
 	require.Equal(t, float64(1), data["up"])
+	// Concurrent additions cannot cross the bounded list's admission limit.
+	seed := make([]entity.Star, 999)
+	for i := range seed {
+		seed[i] = entity.Star{UserID: first.ID, SiteName: "AI", Key: fmt.Sprintf("/seed/%d.pdf", i), Kind: "slide_deck", Title: "Seed", Href: "/n01/"}
+	}
+	require.NoError(t, app.Dao().DB().CreateInBatches(seed, 100).Error)
+	var wg sync.WaitGroup
+	codes := make(chan int, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			code, _ := invoke("PUT", "stars?site_name=AI", a, map[string]any{"key": fmt.Sprintf("/new/%d.pdf", index), "kind": "slide_deck", "title": "Concurrent", "href": "/n01/"})
+			codes <- code
+		}(i)
+	}
+	wg.Wait()
+	close(codes)
+	accepted := 0
+	for code := range codes {
+		if code == 200 {
+			accepted++
+		} else {
+			require.Equal(t, 409, code)
+		}
+	}
+	require.Equal(t, 1, accepted)
 }
