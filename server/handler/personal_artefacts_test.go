@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -91,6 +92,34 @@ func TestPersonalArtefactsPersistAndIsolateUsers(t *testing.T) {
 	require.Equal(t, 200, code)
 	require.Equal(t, "", data["choice"])
 	require.Equal(t, float64(1), data["up"])
+	// Empty resources can receive feedback without a synthetic comment. Native
+	// page vote types remain distinct from comment types, deck and slide pages.
+	resource := "resource-vote?" + url.Values{"site_name": {"AI"}, "page_key": {key + "#slide-002"}, "page_title": {"Deck › Slide 2"}}.Encode()
+	code, data = invoke("GET", resource, a, nil)
+	require.Equal(t, 200, code)
+	require.Equal(t, "", data["choice"])
+	require.True(t, app.Dao().FindPage(key+"#slide-002", "AI").IsEmpty())
+	for _, choice := range []string{"up", "up", "down", "down", ""} {
+		code, data = invoke("PUT", resource, a, map[string]any{"choice": choice})
+		require.Equal(t, 200, code)
+		require.Equal(t, choice, data["choice"])
+		code, read := invoke("GET", resource, a, nil)
+		require.Equal(t, 200, code)
+		require.Equal(t, data, read)
+	}
+	code, _ = invoke("PUT", resource, a, map[string]any{"choice": "up"})
+	require.Equal(t, 200, code)
+	code, data = invoke("GET", resource, b, nil)
+	require.Equal(t, 200, code)
+	require.Equal(t, "", data["choice"])
+	require.Equal(t, float64(1), data["up"])
+	code, data = invoke("GET", "resource-vote?"+url.Values{"site_name": {"AI"}, "page_key": {key}}.Encode(), a, nil)
+	require.Equal(t, 200, code)
+	require.Equal(t, float64(0), data["up"])
+	code, _ = invoke("GET", resource, "", nil)
+	require.Equal(t, 401, code)
+	code, _ = invoke("PUT", resource, b, map[string]any{"choice": "up", "user_id": first.ID})
+	require.Equal(t, 400, code)
 	// Concurrent additions cannot cross the bounded list's admission limit.
 	seed := make([]entity.Star, 999)
 	for i := range seed {
